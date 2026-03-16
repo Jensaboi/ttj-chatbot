@@ -1,0 +1,9 @@
+node_modules/
+
+*.db
+*.rdb
+
+.env
+
+.DS_Store
+Thumbs.db

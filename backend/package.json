@@ -3,14 +3,27 @@
   "version": "1.0.0",
   "description": "tjj-chatbot-backend",
   "main": "index.js",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "nodemon src/app.js"
   },
-  "author": "",
+  "author": "Jens Lundin",
   "license": "ISC",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "eslint": "^10.0.3",
-    "globals": "^17.4.0"
+    "globals": "^17.4.0",
+    "nodemon": "^3.1.14"
+  },
+  "dependencies": {
+    "@langchain/core": "^1.1.32",
+    "@langchain/textsplitters": "^1.0.1",
+    "@supabase/supabase-js": "^2.99.1",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "openai": "^6.29.0",
+    "pdf-parse": "^2.4.5"
   }
 }
