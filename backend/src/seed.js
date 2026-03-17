@@ -179,25 +179,3 @@ async function seedVectorDb() {
 }
 
 seedVectorDb();
-
-/*
-
-const pdfs = await extractTextFromPdfs([
-  {
-    url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/08hm-tagfard---system-h-och-m.pdf",
-    startPage: 5,
-    name: "8HM Tågfärd - System H och M",
-  },
-]);
-console.log("Extracted text from pdfs successfully! ✅");
-
-const sections = parsePdfsToSections(pdfs);
-console.log("Pdfs parsed to sections successfully! ✅");
-
-const chunks = await chunkSections(sections);
-console.log("Text chunked successfully! ✅");
-
-console.log(chunks);
-
-
-*/
