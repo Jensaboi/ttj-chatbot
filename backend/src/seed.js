@@ -12,11 +12,13 @@ const urls = [
     url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/10hms-vaxling--system-h-m-och-s.pdf",
     startPage: 5,
     name: "10HMS Växling – System H, M och S",
+    skipPage: [37, 38, 39, 40],
   },
   {
     url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/04-dialog-och-ordergivning_.pdf",
     startPage: 5,
     name: "4 Dialog och ordergivning",
+    skipPages: [29],
   },
   {
     url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/11-broms.pdf",
@@ -28,6 +30,11 @@ const urls = [
     startPage: 5,
     name: "6 Fara och olycka",
   },
+  {
+    url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/09hms-sparrfard---system-h-m-och-s.pdf",
+    startPage: 5,
+    name: "9HMS Spärrfärd - System H, M och S",
+  },
 ];
 
 export async function extractTextFromPdfs(urls = []) {
@@ -37,23 +44,26 @@ export async function extractTextFromPdfs(urls = []) {
 
     const parsers = urls.map(obj => ({
       parse: new PDFParse({ url: obj.url }),
-      startPage: obj.startPage,
-      name: obj.name,
+      startPage: obj?.startPage ?? 0,
+      name: obj?.name ?? "",
+      skipPages: obj?.skipPages ?? [],
     }));
 
     const parsedPdfs = await Promise.all(
       parsers.map(async pdf => {
         const { pages } = await pdf.parse.getText();
 
-        const startPage = pdf?.startPage ?? 0;
-        const name = pdf.name ?? "";
+        const startPage = pdf.startPage;
+        const name = pdf.name;
         const regex = new RegExp("\\d+\\s+" + name, "g");
+        const skipPages = pdf.skipPages;
 
+        pages.pop(); //remove last page before
         const text = pages
           .filter(page => page.num >= startPage)
+          .filter(page => !skipPages.includes(page.num))
           .map(page => page.text)
           .join(" ")
-          .replace(/Inledning\n/, "")
           .replace(regex, "") //Remove uneccessary module name repetition and page number.
           .replace(/\t+/g, " ") // tabs → spaces
           .replace(/-\n/g, "") // fix hyphenated line breaks kör - tillstånd -> körtillstånd.
@@ -78,21 +88,27 @@ function parsePdfsToSections(pdfs = []) {
   for (const pdf of pdfs) {
     const name = pdf.name;
     const text = pdf.text;
+    const regex = /^(\d(?:\.\d\d?)?)\s{1,}([A-ZÅÄÖa-zåäö”"].*)\n/gm;
 
-    const regex = /\d(\.\d)?  [A-ZÅÄÖ][a-zA-ZÅÄÖåäö ]+\n/gm;
+    const inledning = [...text.matchAll(/^[Ii]nledning\n/gm)];
 
-    const headings = [...text.matchAll(regex)].map(arr => arr[0]);
+    const matches = [inledning[0], ...text.matchAll(regex)];
 
-    headings.unshift("Inledning");
+    const sections = matches.map((match, i) => {
+      const heading = match[0];
 
-    const chapters = text
-      .split(regex)
-      .filter(
-        item => item?.trim() !== "" && item !== undefined && item.length > 5,
-      );
-
-    const sections = headings.map((heading, i) => {
-      const content = chapters[i] ?? "";
+      let content = "";
+      if (i + 1 === matches.length) {
+        content = match.input.slice(
+          match.index + heading.length,
+          match.input.length,
+        );
+      } else {
+        content = match.input.slice(
+          match.index + heading.length,
+          matches[i + 1].index,
+        );
+      }
 
       return { name, heading, content };
     });
@@ -115,7 +131,7 @@ export async function chunkSections(sections) {
         const texts = await splitter.splitText(section.content);
 
         return texts.map(chunk => ({
-          title: section.name,
+          name: section.name,
           heading: section.heading,
           content: section.name + " " + section.heading + "\n" + chunk,
         }));
@@ -128,6 +144,13 @@ export async function chunkSections(sections) {
   }
 }
 
+export function prettifyTermsModule(sections) {
+  return sections.map(section => ({
+    ...section,
+    content: section.content.split("  ").join(" = "),
+  }));
+}
+
 export async function createEmbeddings(chunks) {
   try {
     const embeddings = await Promise.all(
@@ -138,7 +161,7 @@ export async function createEmbeddings(chunks) {
         });
 
         return {
-          title: chunk.title,
+          name: chunk.name,
           heading: chunk.heading,
           content: chunk.content,
           embedding: response.data[0].embedding,
@@ -171,7 +194,32 @@ async function seedVectorDb() {
     await supabase.from("embeddings").insert(embeddings);
     console.log("Embeddings inserted to vector db successfully! ✅");
 
-    console.log("Supbase DB seeded successfully! ✅");
+    const termsPdf = await extractTextFromPdfs([
+      {
+        url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/01-termer.pdf",
+        startPage: 5,
+        name: "1 Termer",
+        skipPages: [36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47],
+      },
+    ]);
+    console.log("Extracted terms text successfully! ✅");
+
+    const termsSections = parsePdfsToSections(termsPdf);
+    console.log("Prased and generated terms sections successfully! ✅");
+
+    const prettyTerms = prettifyTermsModule(termsSections);
+    console.log("Prettifyed terms sections successfully! ✅");
+
+    const termsChunks = await chunkSections(prettyTerms);
+    console.log("Terms text chunked successfully! ✅");
+
+    const termsEmbeddings = await createEmbeddings(termsChunks);
+    console.log("Embeddings created successfully! ✅");
+
+    await supabase.from("embeddings").insert(termsEmbeddings);
+    console.log("Embeddings inserted to vector db successfully! ✅");
+
+    console.log("Script ran successfully! ✅");
   } catch (err) {
     console.log("Failed to seed vector db! 🚫");
     console.error(err);

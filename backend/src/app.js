@@ -33,7 +33,7 @@ chatRouter.get("/", async (req, res) => {
   const { data } = await supabase.rpc("match_embeddings", {
     query_embedding: embedding,
     match_threshold: 0.5,
-    match_count: 15,
+    match_count: 10,
   });
 
   const context = data.map(item => item.content).join(" ");
