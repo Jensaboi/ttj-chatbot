@@ -2,41 +2,6 @@ import { PDFParse } from "pdf-parse";
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { openai, supabase } from "./config.js";
 
-const urls = [
-  {
-    url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/08hm-tagfard---system-h-och-m.pdf",
-    startPage: 5,
-    name: "8HM Tågfärd - System H och M",
-  },
-  {
-    url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/10hms-vaxling--system-h-m-och-s.pdf",
-    startPage: 5,
-    name: "10HMS Växling – System H, M och S",
-    skipPage: [37, 38, 39, 40],
-  },
-  {
-    url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/04-dialog-och-ordergivning_.pdf",
-    startPage: 5,
-    name: "4 Dialog och ordergivning",
-    skipPages: [29],
-  },
-  {
-    url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/11-broms.pdf",
-    startPage: 5,
-    name: "11 Broms",
-  },
-  {
-    url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/06-fara-och-olycka.pdf",
-    startPage: 5,
-    name: "6 Fara och olycka",
-  },
-  {
-    url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/09hms-sparrfard---system-h-m-och-s.pdf",
-    startPage: 5,
-    name: "9HMS Spärrfärd - System H, M och S",
-  },
-];
-
 export async function extractTextFromPdfs(urls = []) {
   try {
     if (!Array.isArray(urls)) throw new Error("Urls must be typeof array.");
@@ -47,19 +12,21 @@ export async function extractTextFromPdfs(urls = []) {
       startPage: obj?.startPage ?? 0,
       name: obj?.name ?? "",
       skipPages: obj?.skipPages ?? [],
+      partial: obj?.partial,
     }));
 
     const parsedPdfs = await Promise.all(
       parsers.map(async pdf => {
-        const { pages } = await pdf.parse.getText();
+        const { pages } = await pdf.parse.getText({ partial: pdf?.partial });
 
         const startPage = pdf.startPage;
         const name = pdf.name;
         const regex = new RegExp("\\d+\\s+" + name, "g");
         const skipPages = pdf.skipPages;
 
-        pages.pop(); //remove last page before
-        const text = pages
+        if (!pdf.partial) pages.pop(); //remove last page if you dont specificly select pages to parse
+
+        let text = pages
           .filter(page => page.num >= startPage)
           .filter(page => !skipPages.includes(page.num))
           .map(page => page.text)
@@ -88,7 +55,8 @@ function parsePdfsToSections(pdfs = []) {
   for (const pdf of pdfs) {
     const name = pdf.name;
     const text = pdf.text;
-    // /^(\d(?:\.\d\d?)?)\s{1,}([A-ZÅÄÖa-zåäö”"].*)\n/gm;
+    const [module, systems] = name?.split("-");
+    const [moduleNumber, moduleName] = module?.split(" ");
     const regex = /^(\d(?:\.\d\d?)?)\s{1,}([A-ZÅÄÖa-zåäö”"].*)\n/gm;
 
     const inledning = [...text.matchAll(/^[Ii]nledning\n/gm)];
@@ -127,6 +95,9 @@ function parsePdfsToSections(pdfs = []) {
 
       return {
         name,
+        moduleName,
+        moduleNumber,
+        systems: systems?.trim(),
         chapter,
         chapterNumber,
         sectionName,
@@ -135,7 +106,7 @@ function parsePdfsToSections(pdfs = []) {
       };
     });
 
-    temp.push(...sections.filter(item => item));
+    temp.push(...sections);
   }
 
   return temp;
@@ -201,6 +172,45 @@ export async function createEmbeddings(chunks) {
 
 async function seedVectorDb() {
   try {
+    const urls = [
+      {
+        url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/08hm-tagfard---system-h-och-m.pdf",
+        startPage: 5,
+        name: "8HM Tågfärd - System H och M",
+      },
+      {
+        url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/10hms-vaxling--system-h-m-och-s.pdf",
+        startPage: 5,
+        name: "10HMS Växling – System H, M och S",
+        skipPage: [37, 38, 39, 40],
+      },
+      {
+        url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/04-dialog-och-ordergivning_.pdf",
+        startPage: 5,
+        name: "4 Dialog och ordergivning",
+        skipPages: [29],
+      },
+      {
+        url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/11-broms.pdf",
+        startPage: 5,
+        name: "11 Broms",
+      },
+      {
+        url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/06-fara-och-olycka.pdf",
+        startPage: 5,
+        name: "6 Fara och olycka",
+      },
+      {
+        url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/09hms-sparrfard---system-h-m-och-s.pdf",
+        startPage: 5,
+        name: "9HMS Spärrfärd - System H, M och S",
+      },
+      {
+        url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/07-vagvakt.pdf",
+        startPage: 5,
+        name: "7 Vägvakt",
+      },
+    ];
     const pdfs = await extractTextFromPdfs(urls);
     console.log("Text extracted from pdfs successfully! ✅");
 
@@ -247,6 +257,67 @@ async function seedVectorDb() {
     console.error(err);
   }
 }
+
+async function insertModules() {
+  const urls = [
+    {
+      url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/01-termer.pdf",
+      name: "1 Termer",
+      partial: [5],
+    },
+    {
+      url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/03-signaler---gemensamma-regler_.pdf",
+      name: "3 Signaler – Gemensamma regler",
+      partial: [7],
+    },
+    {
+      url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/03hms-signaler---system-h-m-och-s.pdf",
+      name: "3HMS Signaler - System H, M och S",
+      partial: [7],
+    },
+    {
+      url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/04-dialog-och-ordergivning_.pdf",
+      name: "4 Dialog och ordergivning",
+      partial: [5],
+    },
+    {
+      url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/06-fara-och-olycka.pdf",
+      name: "6 Fara och olycka",
+      partial: [5],
+    },
+    {
+      url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/07-vagvakt.pdf",
+      name: "7 Vägvakt",
+      partial: [5],
+    },
+    {
+      url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/08hm-tagfard---system-h-och-m.pdf",
+      name: "8HM Tågfärd - System H och M",
+      partial: [5],
+    },
+    {
+      url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/09hms-sparrfard---system-h-m-och-s.pdf",
+      name: "9HMS Spärrfärd - System H, M och S",
+      partial: [5],
+    },
+    {
+      url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/10hms-vaxling--system-h-m-och-s.pdf",
+      name: "10HMS Växling – System H, M och S",
+      partial: [5],
+    },
+    {
+      url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/11-broms.pdf",
+      name: "11 Broms",
+      partial: [5],
+    },
+  ];
+
+  const pdfs = await extractTextFromPdfs(urls);
+
+  const sections = parsePdfsToSections(pdfs);
+}
+
+//insertModules();
 
 //seedVectorDb();
 
