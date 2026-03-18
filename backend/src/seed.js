@@ -229,17 +229,3 @@ async function seedVectorDb() {
 }
 
 //seedVectorDb();
-
-const pdfs = await extractTextFromPdfs([
-  {
-    url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/03hms-signaler---system-h-m-och-s.pdf",
-    startPage: 11,
-    name: "3HMS Signaler - System H, M och S",
-  },
-]);
-console.log("Text extracted from pdfs successfully! ✅");
-
-const sections = parsePdfsToSections(pdfs);
-console.log("Prased and generated pdf sections successfully! ✅");
-
-console.log(sections);
