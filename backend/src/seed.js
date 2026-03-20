@@ -270,8 +270,7 @@ function parseTextToSections(text) {
   const pageAndModulRegex = /^\d+\t\d{1,2}.+\n/gm;
   const headingRegex = /^(\d(?:\.\d\d?)?)\s{1,}\t?([A-ZÅÄÖa-zåäö”" ,-]+\n)/gm;
 
-  const pagesMatches = [...pdf.text.matchAll(pageAndModulRegex)];
-
+  const pageMatches = [...pdf.text.matchAll(pageAndModulRegex)];
   const headingMatches = [...pdf.text.matchAll(headingRegex)];
 
   const sections = headingMatches.map((item, i) => {
@@ -279,13 +278,23 @@ function parseTextToSections(text) {
     const startIndex = item.index + heading.length;
 
     let endIndex = headingMatches[i + 1]?.index;
+
     if (headingMatches.length - 1 === i) endIndex = pdf.text.length;
 
     let text = pdf.text.slice(startIndex, endIndex);
 
-    text = text.replace(/-\n/gm, "");
+    let pageAndModul =
+      pageMatches.find(page => page.index >= startIndex)?.[0] ??
+      pageMatches.pop()?.[0];
 
-    return { heading, text, startIndex, endIndex };
+    let cleaned = pageAndModul.replace(/\d+\t/gm, "").replace(/\n/gm, "");
+
+    let [module, system] = cleaned.split("–");
+
+    module = module?.trim() ?? "";
+    system = system?.trim() ?? "";
+
+    return { module, system, heading, startIndex, endIndex, text };
   });
 
   return sections;
