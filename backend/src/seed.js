@@ -266,32 +266,34 @@ const pdf = await getTextFromPdf({
   skipPage: [7, 6],
 });
 
-const pageAndModulRegex = /^\d+\t\d{1,2}.+\n/gm;
-const headingRegex = /(\d(?:\.\d\d?)?)\s{1,}\t([A-ZÅÄÖa-zåäö”" ,]+\n)/gm;
+function parseTextToSections(text) {
+  const pageAndModulRegex = /^\d+\t\d{1,2}.+\n/gm;
+  const headingRegex = /^(\d(?:\.\d\d?)?)\s{1,}\t?([A-ZÅÄÖa-zåäö”" ,-]+\n)/gm;
 
-const pages = [...pdf.text.matchAll(pageAndModulRegex)];
+  const pagesMatches = [...pdf.text.matchAll(pageAndModulRegex)];
 
-const headings = [...pdf.text.matchAll(headingRegex)];
+  const headingMatches = [...pdf.text.matchAll(headingRegex)];
 
-const result = headings.map((item, i) => {
-  const heading = item[0];
-  const startIndex = item.index + heading.length;
+  const sections = headingMatches.map((item, i) => {
+    const heading = item[0];
+    const startIndex = item.index + heading.length;
 
-  let endIndex = headings[i + 1]?.index;
-  if (headings.length - 1 === i) endIndex = pdf.text.length;
+    let endIndex = headingMatches[i + 1]?.index;
+    if (headingMatches.length - 1 === i) endIndex = pdf.text.length;
 
-  let text = pdf.text.slice(startIndex, endIndex);
+    let text = pdf.text.slice(startIndex, endIndex);
 
-  text = text.replace(/-\n/gm, "");
+    text = text.replace(/-\n/gm, "");
 
-  return { heading, text, startIndex, endIndex };
-});
+    return { heading, text, startIndex, endIndex };
+  });
 
-for (const page of pages) {
-  console.log({ ...page, input: 0 });
+  return sections;
 }
 
-console.log(result);
+const sections = parseTextToSections(pdf);
+
+console.log(sections);
 
 //console.log(pdf);
 
