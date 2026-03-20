@@ -21,7 +21,8 @@ export async function getTextFromPdf({
       .filter(page => page.num >= startPage)
       .filter(page => !skipPage.includes(page.num))
       .map(page => page.text)
-      .join("\n");
+      .join("\n")
+      .replace(/-\n/g, "");
 
     return { text };
   } catch (err) {
@@ -32,7 +33,7 @@ export async function getTextFromPdf({
   }
 }
 
-function parseTextToSections(text) {
+function parseText(text) {
   const pageAndModulRegex = /^\d+\t\d{1,2}.+\n/gm;
   const headingRegex = /^(\d(?:\.\d\d?)?)\s{1,}\t?([A-ZÅÄÖa-zåäö”" ,-]+\n)/gm;
 
@@ -47,7 +48,12 @@ function parseTextToSections(text) {
 
     if (headingMatches.length - 1 === i) endIndex = text.length;
 
-    let section = text.slice(startIndex, endIndex);
+    let content = text
+      .slice(startIndex, endIndex)
+      .replace(pageAndModulRegex, "")
+      .replace(/\n•/g, "-BULLET-")
+      .replace(/\n/g, " ")
+      .replace(/-BULLET-/g, "\n•");
 
     let pageAndModule =
       pageMatches.find(page => page.index >= startIndex)?.[0] ??
@@ -61,7 +67,7 @@ function parseTextToSections(text) {
 
     const sectionNumber = heading.match(/^\d+(\.\d+)?/)?.[0];
 
-    const sectionName = heading.replace(sectionNumber, "")?.trim();
+    const section = heading.replace(sectionNumber, "")?.trim();
 
     let [module, system] = cleanedModule.split("–");
 
@@ -77,8 +83,8 @@ function parseTextToSections(text) {
       system,
       heading,
       sectionNumber,
-      sectionName,
       section,
+      content,
       startIndex,
       endIndex,
     };
@@ -87,49 +93,7 @@ function parseTextToSections(text) {
   return sections;
 }
 
-async function chunkSections(sections) {
-  const splitter = new RecursiveCharacterTextSplitter({
-    chunkSize: 1000,
-    chunkOverlap: 200,
-  });
-
-  const chunks = await Promise.all(
-    sections.map(
-      async ({
-        module,
-        moduleName,
-        moduleNumber,
-        chapter,
-        chapterNumber,
-        section,
-        sectionNumber,
-        content,
-      }) => {
-        let string = content.replace(/\n/gm, " ");
-
-        const texts = await splitter.splitText(string);
-
-        const chunks = texts.map(chunk => ({
-          module,
-          moduleName,
-          moduleNumber,
-          chapter,
-          chapterNumber,
-          section,
-          sectionNumber,
-          chunk,
-          text:
-            `Modul: ${module}\n${moduleName}, ${chapterNumber ? `Kapitel ${chapterNumber}, ${chapter}\n` : ""}${sectionNumber ? `Avsnitt ${sectionNumber}, ${section}\n` : ""}` +
-            chunk,
-        }));
-
-        return chunks;
-      },
-    ),
-  );
-
-  return chunks.flat();
-}
+async function chunkSections(sections) {}
 
 export function prettifyTermsModule(sections) {
   return sections.map(section => ({
@@ -258,10 +222,11 @@ const pdf = await getTextFromPdf({
   skipPage: [7, 6],
 });
 
-const sections = parseTextToSections(pdf.text);
+const sections = parseText(pdf.text);
 
-console.log(pdf.text);
-console.log(sections.slice(7, 9));
+console.log({ text: pdf.text });
+
+console.log(sections.slice(0, 10));
 
 //console.log(pdf);
 
