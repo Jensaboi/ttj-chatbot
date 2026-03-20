@@ -32,67 +32,59 @@ export async function getTextFromPdf({
   }
 }
 
-function parseText(text) {
-  const temp = [];
-  for (const pdf of pdfs) {
-    const name = pdf.name;
-    const text = pdf.text;
-    const module = name?.split("-")?.[0]?.trim() ?? "";
-    const [moduleNumber, moduleName] = module.split(" ");
-    const sectionNameRegex = /^(\d(?:\.\d\d?)?)\s{2,}([A-ZÅÄÖa-zåäö”"].*)\n/gm;
+function parseTextToSections(text) {
+  const pageAndModulRegex = /^\d+\t\d{1,2}.+\n/gm;
+  const headingRegex = /^(\d(?:\.\d\d?)?)\s{1,}\t?([A-ZÅÄÖa-zåäö”" ,-]+\n)/gm;
 
-    const inledning = [...text.matchAll(/^[Ii]nledning\n/gm)];
+  const pageMatches = [...text.matchAll(pageAndModulRegex)];
+  const headingMatches = [...text.matchAll(headingRegex)];
 
-    const matches = [inledning[0], ...text.matchAll(sectionNameRegex)];
+  const sections = headingMatches.map((item, i) => {
+    const match = item[0];
+    const startIndex = item.index + match.length;
+    const nextMatch = headingMatches[i + 1];
+    let endIndex = nextMatch?.index;
 
-    let chapter = null;
-    let chapterNumber = null;
+    if (headingMatches.length - 1 === i) endIndex = text.length;
 
-    const sections = matches.map((match, i) => {
-      if (!match) return null;
+    let section = text.slice(startIndex, endIndex);
 
-      if (i < 10) console.log(match);
+    let pageAndModule =
+      pageMatches.find(page => page.index >= startIndex)?.[0] ??
+      pageMatches[pageMatches.length - 1][0];
 
-      const fullMatch = match[0];
-      let section = match?.[2] ? match[2] : match[0] ? match[0] : "";
-      let sectionNumber = match?.[1] ? parseFloat(match[1]) : null;
+    const cleanedModule = pageAndModule
+      .replace(/\d+\t/gm, "")
+      .replace(/\n/gm, "");
 
-      if (Number.isInteger(sectionNumber) || sectionNumber === null) {
-        chapter = section;
-        chapterNumber = sectionNumber;
-        sectionNumber = null;
-        section = null;
-      }
+    const heading = match.replace(/\t/, "").replace(/\n/, "");
 
-      let content;
-      if (i + 1 === matches.length) {
-        content = match.input.slice(
-          match.index + fullMatch.length,
-          match.input.length,
-        );
-      } else {
-        content = match.input.slice(
-          match.index + fullMatch.length,
-          matches[i + 1].index,
-        );
-      }
+    const sectionNumber = heading.match(/^\d+(\.\d+)?/)?.[0];
 
-      return {
-        module,
-        moduleName,
-        moduleNumber,
-        chapter,
-        chapterNumber,
-        section,
-        sectionNumber,
-        content,
-      };
-    });
+    const sectionName = heading.replace(sectionNumber, "")?.trim();
 
-    temp.push(...sections);
-  }
+    let [module, system] = cleanedModule.split("–");
 
-  return temp;
+    module = module?.trim() ?? "";
+    system = system?.trim() ?? "";
+
+    const [moduleNumber, operation] = module.split(" ");
+
+    return {
+      module,
+      moduleNumber,
+      operation,
+      system,
+      heading,
+      sectionNumber,
+      sectionName,
+      section,
+      startIndex,
+      endIndex,
+    };
+  });
+
+  return sections;
 }
 
 async function chunkSections(sections) {
@@ -266,43 +258,10 @@ const pdf = await getTextFromPdf({
   skipPage: [7, 6],
 });
 
-function parseTextToSections(text) {
-  const pageAndModulRegex = /^\d+\t\d{1,2}.+\n/gm;
-  const headingRegex = /^(\d(?:\.\d\d?)?)\s{1,}\t?([A-ZÅÄÖa-zåäö”" ,-]+\n)/gm;
+const sections = parseTextToSections(pdf.text);
 
-  const pageMatches = [...pdf.text.matchAll(pageAndModulRegex)];
-  const headingMatches = [...pdf.text.matchAll(headingRegex)];
-
-  const sections = headingMatches.map((item, i) => {
-    const heading = item[0];
-    const startIndex = item.index + heading.length;
-
-    let endIndex = headingMatches[i + 1]?.index;
-
-    if (headingMatches.length - 1 === i) endIndex = pdf.text.length;
-
-    let text = pdf.text.slice(startIndex, endIndex);
-
-    let pageAndModul =
-      pageMatches.find(page => page.index >= startIndex)?.[0] ??
-      pageMatches.pop()?.[0];
-
-    let cleaned = pageAndModul.replace(/\d+\t/gm, "").replace(/\n/gm, "");
-
-    let [module, system] = cleaned.split("–");
-
-    module = module?.trim() ?? "";
-    system = system?.trim() ?? "";
-
-    return { module, system, heading, startIndex, endIndex, text };
-  });
-
-  return sections;
-}
-
-const sections = parseTextToSections(pdf);
-
-console.log(sections);
+console.log(pdf.text);
+console.log(sections.slice(7, 9));
 
 //console.log(pdf);
 
