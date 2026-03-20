@@ -2,6 +2,7 @@ import { PDFParse } from "pdf-parse";
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { openai, supabase } from "./config.js";
 
+//extract text from pdfs
 export async function getTextFromPdf({
   url,
   partial,
@@ -33,73 +34,149 @@ export async function getTextFromPdf({
   }
 }
 
-function parseText(text) {
-  const pageAndModulRegex = /^\d+\s?\t.+\n/gm;
+//parse the given pdf text into sections and remove noise
+function parseTextToSection(text) {
+  const pageAndModulRegex = /^\d+\t\d{1,}[A-ZÅÄÖa-zåäö”" ,-–]+\n/gm;
   const headingRegex = /^(\d(?:\.\d\d?)?)\s{1,}\t?([A-ZÅÄÖa-zåäö”" ,-]+\n)/gm;
 
   const pageMatches = [...text.matchAll(pageAndModulRegex)];
   const headingMatches = [...text.matchAll(headingRegex)];
 
+  let chapter = "";
+  let chapterNumber = "";
+
   const sections = headingMatches.map((item, i) => {
     const match = item[0];
-    const startIndex = item.index + match.length;
+    const startIndex = item.index + match?.length;
     const nextMatch = headingMatches[i + 1];
     let endIndex = nextMatch?.index;
 
     if (headingMatches.length - 1 === i) endIndex = text.length;
+
+    let pageAndModule =
+      pageMatches.find(page => page.index >= startIndex)?.[0] ??
+      pageMatches[pageMatches.length - 1][0];
+
+    const cleanedMatch = pageAndModule.replace(/\d+\t/, "").replace(/\n/, "");
+
+    let [module, system] = cleanedMatch.split(/[–-]/);
+
+    module = module?.trim() ?? "";
+    system = system?.trim() ?? "";
+
+    const [moduleNumber, operation] = module.split(" ") ?? ["", ""];
+
+    const heading = match.replace(/\t/, "").replace(/\n/, "");
+
+    let sectionNumber = heading.match(/^\d+(\.\d+)?/)?.[0];
+    let section = heading.replace(sectionNumber, "")?.trim();
+    sectionNumber = parseFloat(sectionNumber);
+
+    if (Number.isInteger(sectionNumber)) {
+      chapter = section;
+      chapterNumber = sectionNumber;
+
+      sectionNumber = null;
+      section = null;
+    }
 
     let content = text
       .slice(startIndex, endIndex)
       .replace(pageAndModulRegex, "")
       .replace(/\n•/g, "-BULLET-")
       .replace(/\n/g, " ")
-      .replace(/-BULLET-/g, "\n•");
-
-    let pageAndModule =
-      pageMatches.find(page => page.index >= startIndex)?.[0] ??
-      pageMatches[pageMatches.length - 1][0];
-
-    const cleanedModule = pageAndModule
-      .replace(/\d+\t/gm, "")
-      .replace(/\n/gm, "");
-
-    const heading = match.replace(/\t/, "").replace(/\n/, "");
-
-    const sectionNumber = heading.match(/^\d+(\.\d+)?/)?.[0];
-
-    const section = heading.replace(sectionNumber, "")?.trim();
-
-    let [module, system] = cleanedModule.split("–");
-
-    module = module?.trim() ?? "";
-    system = system?.trim() ?? "";
-
-    const [moduleNumber, operation] = module.split(" ");
+      .replace(/-BULLET-/g, "\n•")
+      .trim();
 
     return {
       module,
       moduleNumber,
       operation,
       system,
-      heading,
-      sectionNumber,
+      chapter,
+      chapterNumber,
       section,
+      sectionNumber,
       content,
-      startIndex,
-      endIndex,
     };
   });
 
   return sections;
 }
 
-async function chunkSections(sections) {}
+//Use recursive text splitter to split sections into chunks with overlap
+async function chunkSections(sections) {
+  const splitter = new RecursiveCharacterTextSplitter({
+    chunkSize: 1000,
+    chunkOverlap: 200,
+  });
+  const result = await Promise.all(
+    sections.map(async section => {
+      const texts = await splitter.splitText(section.content);
 
-export function prettifyTermsModule(sections) {
-  return sections.map(section => ({
-    ...section,
-    content: section.content.split("  ").join(" = "),
-  }));
+      const chunks = texts
+        .map(chunk => ({
+          module: section.module,
+          moduleNumber: section.moduleNumber,
+          operation: section.operation,
+          system: section.system,
+          sectionNumber: section.sectionNumber,
+          section: section.section,
+          chapter: section.chapter,
+          chapterNumber: section.chapterNumber,
+          chunk,
+        }))
+        .filter(item => item.content !== "");
+
+      return [...chunks];
+    }),
+  );
+
+  return result.flat();
+}
+
+export function parseTerms(sections) {
+  const sectionTerms = sections.map(section => {
+    const termsRegex = /\t/gm;
+
+    const matches = [...section.content.matchAll(termsRegex)];
+
+    if (matches.length === 0) return;
+
+    let nextItemTerm = "";
+
+    const terms = matches
+      .map((item, i) => {
+        const index = item.index;
+        const startIndex = index + item[0].length;
+        const input = item.input;
+        const nextMatchIndex = matches[i + 1]?.index ?? input.length;
+
+        let term;
+        if (i === 0) {
+          term = input.slice(0, index);
+        } else {
+          term = nextItemTerm.trim();
+        }
+        const stringToNextMatch = input.slice(startIndex, nextMatchIndex);
+        const strArr = stringToNextMatch.split(".");
+
+        nextItemTerm = strArr.pop();
+
+        const answer = strArr.join(".").trim("");
+
+        return {
+          ...section,
+          content: null,
+          chunk: `${section.section}\nMed ${term} menas: ${answer}`,
+        };
+      })
+      .filter(item => item.answer !== "" || item.term !== "");
+
+    return terms;
+  });
+
+  return sectionTerms.flat();
 }
 
 export async function createEmbeddings(chunks) {
@@ -107,14 +184,20 @@ export async function createEmbeddings(chunks) {
     const embeddings = await Promise.all(
       chunks.map(async chunk => {
         const response = await openai.embeddings.create({
-          input: chunk.content,
+          input: chunk.chunk,
           model: process.env.OPENAI_EMBEDDING_MODEL,
         });
 
         return {
-          name: chunk.name,
-          heading: chunk.heading,
-          content: chunk.content,
+          module: chunk.module,
+          module_number: chunk.moduleNumber,
+          operation: chunk.operation,
+          system: chunk.system,
+          section_number: chunk.sectionNumber,
+          section: chunk.section,
+          chapter: chunk.chapter,
+          chapter_number: chunk.chapterNumber,
+          chunk: chunk.chunk,
           embedding: response.data[0].embedding,
         };
       }),
@@ -134,79 +217,85 @@ async function seedVectorDb() {
       {
         url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/08hm-tagfard---system-h-och-m.pdf",
         startPage: 5,
-        name: "8HM Tågfärd - System H och M",
       },
       {
         url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/10hms-vaxling--system-h-m-och-s.pdf",
         startPage: 5,
-        name: "10HMS Växling – System H, M och S",
         skipPage: [37, 38, 39, 40],
       },
       {
         url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/04-dialog-och-ordergivning_.pdf",
         startPage: 5,
-        name: "4 Dialog och ordergivning",
-        skipPages: [29],
+        skipPage: [29],
       },
       {
         url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/11-broms.pdf",
         startPage: 5,
-        name: "11 Broms",
       },
       {
         url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/06-fara-och-olycka.pdf",
         startPage: 5,
-        name: "6 Fara och olycka",
       },
       {
         url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/09hms-sparrfard---system-h-m-och-s.pdf",
         startPage: 5,
-        name: "9HMS Spärrfärd - System H, M och S",
       },
       {
         url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/07-vagvakt.pdf",
         startPage: 5,
-        name: "7 Vägvakt",
       },
     ];
-    const pdfs = await extractTextFromPdfs(urls);
+
+    const modulesText = await Promise.all(
+      urls.map(async url => getTextFromPdf(url)),
+    );
     console.log("Text extracted from pdfs successfully! ✅");
 
-    const sections = parsePdfsToSections(pdfs);
+    let sections = modulesText.map(module => parseTextToSection(module.text));
     console.log("Prased and generated pdf sections successfully! ✅");
+
+    sections = sections.flat();
+
+    await supabase.from("sections").insert(
+      sections.map(section => ({
+        ...section,
+        section_number: section.sectionNumber,
+        chapter_number: section.chapterNumber,
+      })),
+    );
+    console.log("Inserted sections successfully to supabase! ✅");
 
     const chunks = await chunkSections(sections);
     console.log("Text chunked successfully! ✅");
+
+    const termsText = await getTextFromPdf({
+      url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/01-termer.pdf",
+      startPage: 6,
+      skipPage: [36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47],
+    });
+    console.log("Get text from terms pdf successfully! ✅");
+
+    const termsSections = parseTextToSection(termsText.text);
+    console.log("Prased terms to sections successfully! ✅");
+
+    await supabase.from("sections").insert(
+      termsSections.map(section => ({
+        ...section,
+        section_number: section.sectionNumber,
+        chapter_number: section.chapterNumber,
+      })),
+    );
+    console.log("Terms sections insterted successfully to supabase! ✅");
+
+    const terms = parseTerms(termsSections);
+    console.log("Terms parsed successfully! ✅");
+
+    chunks.push(...terms);
 
     const embeddings = await createEmbeddings(chunks);
     console.log("Embeddings created successfully! ✅");
 
     await supabase.from("embeddings").insert(embeddings);
-    console.log("Embeddings inserted to vector db successfully! ✅");
-
-    const termsPdf = await extractTextFromPdfs([
-      {
-        url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/01-termer.pdf",
-        startPage: 5,
-        name: "1 Termer",
-        skipPages: [36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47],
-      },
-    ]);
-    console.log("Extracted terms text successfully! ✅");
-
-    const termsSections = parsePdfsToSections(termsPdf);
-    console.log("Prased and generated terms sections successfully! ✅");
-
-    const prettyTerms = prettifyTermsModule(termsSections);
-    console.log("Prettifyed terms sections successfully! ✅");
-
-    const termsChunks = await chunkSections(prettyTerms);
-    console.log("Terms text chunked successfully! ✅");
-
-    const termsEmbeddings = await createEmbeddings(termsChunks);
-    console.log("Embeddings created successfully! ✅");
-
-    await supabase.from("embeddings").insert(termsEmbeddings);
     console.log("Embeddings inserted to vector db successfully! ✅");
 
     console.log("Script ran successfully! ✅");
@@ -216,24 +305,4 @@ async function seedVectorDb() {
   }
 }
 
-const pdf = await getTextFromPdf({
-  url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/10hms-vaxling--system-h-m-och-s.pdf",
-  startPage: 5,
-  skipPage: [7, 6],
-});
-
-const sections = parseText(pdf.text);
-
-console.log({ text: pdf.text });
-
-console.log(sections.slice(0, 5));
-
-//console.log(pdf);
-
-//create chapter/section regex.
-//matchAll with regex.
-//create sections
-//remove page/module text
-//compare chapter/section index with page/module index
-//give correct modulename and system to section
-//Remove
+await seedVectorDb();
