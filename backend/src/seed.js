@@ -83,9 +83,8 @@ function parseTextToSection(text) {
     let content = text
       .slice(startIndex, endIndex)
       .replace(pageAndModulRegex, "")
-      .replace(/\n•/g, "-BULLET-")
       .replace(/\n/g, " ")
-      .replace(/-BULLET-/g, "\n•")
+      .replace(/•/g, "\n•")
       .trim();
 
     return {
@@ -126,7 +125,8 @@ async function chunkSections(sections) {
           chapterNumber: section.chapterNumber,
           chunk,
         }))
-        .filter(item => item.content !== "");
+        .filter(item => item.chunk !== null && item.chunk !== undefined)
+        .filter(item => item.chunk.length > 20);
 
       return [...chunks];
     }),
@@ -140,8 +140,6 @@ export function parseTerms(sections) {
     const termsRegex = /\t/gm;
 
     const matches = [...section.content.matchAll(termsRegex)];
-
-    if (matches.length === 0) return;
 
     let nextItemTerm = "";
 
@@ -168,10 +166,11 @@ export function parseTerms(sections) {
         return {
           ...section,
           content: null,
-          chunk: `${section.section}\nMed ${term} menas: ${answer}`,
+          chunk: `Med ${term} menas: ${answer}`,
         };
       })
-      .filter(item => item.answer !== "" || item.term !== "");
+      .filter(item => item.answer !== "")
+      .filter(item => item.term !== "");
 
     return terms;
   });
@@ -256,15 +255,6 @@ async function seedVectorDb() {
 
     sections = sections.flat();
 
-    await supabase.from("sections").insert(
-      sections.map(section => ({
-        ...section,
-        section_number: section.sectionNumber,
-        chapter_number: section.chapterNumber,
-      })),
-    );
-    console.log("Inserted sections successfully to supabase! ✅");
-
     const chunks = await chunkSections(sections);
     console.log("Text chunked successfully! ✅");
 
@@ -276,16 +266,7 @@ async function seedVectorDb() {
     console.log("Get text from terms pdf successfully! ✅");
 
     const termsSections = parseTextToSection(termsText.text);
-    console.log("Prased terms to sections successfully! ✅");
-
-    await supabase.from("sections").insert(
-      termsSections.map(section => ({
-        ...section,
-        section_number: section.sectionNumber,
-        chapter_number: section.chapterNumber,
-      })),
-    );
-    console.log("Terms sections insterted successfully to supabase! ✅");
+    console.log("Parsed terms to sections successfully! ✅");
 
     const terms = parseTerms(termsSections);
     console.log("Terms parsed successfully! ✅");
@@ -301,8 +282,20 @@ async function seedVectorDb() {
     console.log("Script ran successfully! ✅");
   } catch (err) {
     console.log("Failed to seed vector db! 🚫");
+    console.log(err.message);
     console.error(err);
   }
 }
 
 await seedVectorDb();
+/* 
+const termsText = await getTextFromPdf({
+  url: "https://bransch.trafikverket.se/contentassets/18aa4c18f60e48c398afa22e65079111/01-termer.pdf",
+  startPage: 6,
+  skipPage: [36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47],
+});
+
+const termsSections = parseTextToSection(termsText.text);
+
+const terms = parseTerms(termsSections);
+console.log(terms); */

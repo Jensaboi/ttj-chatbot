@@ -36,12 +36,22 @@ chatRouter.get("/", async (req, res) => {
     match_count: 10,
   });
 
-  const context = data.map(item => item.content).join(" ");
+  const modules = [...new Set(data.map(module => module.module))];
+
+  const context = modules.map(module => {
+    const matches = data.filter(item => item.module === module);
+
+    const sections = matches.map(
+      match =>
+        `Verksamhet ${match.operation}\nAvsnitt ${match.section_number} ${match.section}\n${match.chunk}`,
+    );
+    return `I modul ${module}\n${sections.join("\n")}`;
+  });
 
   messages.push({
     role: "user",
     content: `
-      Kontext: ${context}
+      Kontext: ${context.join("\n")}
 
       Fråga: """
       ${input}
